@@ -175,7 +175,7 @@ for tdesc in "${testcases[@]}"; do
 		  result=${BASH_REMATCH[1]}
 		  result=${result%%' ('*}
 		  [[ ${result} == 'expected failure' ]] && result='xfail'
-		  [[ ${result} == 'skipped' ]] && result='-'
+		  [[ ${result} == 'skipped' ]] && result='skip'
 		else
 		  result=err
 		fi
