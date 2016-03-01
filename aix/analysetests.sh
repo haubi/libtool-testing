@@ -1,5 +1,36 @@
 #! /usr/bin/env bash
 
+showAll=false
+
+while (( $# > 0 ))
+do
+  case $1 in
+  --all) showAll=true ;;
+  --diff) showAll=false ;;
+  --help) cat <<EOF
+$0 [--all|--help] <srcdir> <testrundirs...>
+
+Analyze and compare libtool test suite results from running on AIX in
+<testrundirs....>, using test cases from libtool source found in <srcdir>.
+
+Output is one line per test-case and compiler-combo, and one column per test
+run configured with "LDFLAGS=-brtl" and "--with-aix-soname={aix,both,svr4}".
+
+ --all
+ --diff
+     Show results from all test runs even if identical across all test runs.
+     Default is to show results which change across test runs.
+
+ --help
+     This help.
+
+EOF
+    exit 0 ;;
+  *) break ;;
+  esac
+  shift
+done
+
 srcdir=$(cd "${1:-./libtool}" && pwd -P)
 shift
 
@@ -115,7 +146,7 @@ for tdesc in "${testcases[@]}"; do
   tname=${tdesc%%;*};   tdesc=${tdesc#${tname};}
   tdomain=${tdesc%%;*}; tdesc=${tdesc#${tdomain};}
 
-  printf "%3s: %s\n" "${tno}" "${tname}"
+  headerLine="$(printf "%3s: %s" "${tno}" "${tname}")\n"
   indent=$(printf "%3s  " '')
 
   for bitsdef  in "${bitdefs[@]}"; do
@@ -128,19 +159,22 @@ for tdesc in "${testcases[@]}"; do
       ccdir=${combodef#*:}
       ccdir=${ccdir%:*}
       ccvar=${combodef##*:}
-      printf "%s%4s %9s" "${indent}" "${bitstext}" "${cctext}"
+      needBody=false
+      bodyLine="$(printf "%s%4s %9s" "${indent}" "${bitstext}" "${cctext}")"
 
       for rtldef in "${rtldefs[@]}";  do
 	rtltext=${rtldef%%:*}
 	rtldir=${rtldef##*:}
 	rtlvar=${rtldir}
-	printf " %${#rtltext}s" ''
+	unset firstResult
+	bodyLine+="$(printf " %${#rtltext}s" '')"
 
 	testdirno=0
 	for testdir in "${testdirs[@]}"; do
 	  (( ++testdirno ))
 
-	  printf "|"
+	  thisResult=""
+	  bodyLine+="|"
 
 	  for sodef in "${sodefs[@]}"; do
 	    soname=${sodef%%:*}
@@ -182,12 +216,23 @@ for tdesc in "${testcases[@]}"; do
 		break
 	      fi
 	    done
-	    printf " %-7s" "${result}"
+	    thisResult+="$(printf " %-7s" "${result}")"
 	  done
-	  printf " "
+	  thisResult+=" "
+	  bodyLine+="${thisResult}"
+	  if [[ "${firstResult-unset}" = unset ]]; then
+	    firstResult=${thisResult}
+	  elif [[ "${firstResult}" != "${thisResult}" ]]; then
+	    needBody=true
+	  fi
 	done
       done
-      printf "\n"
+      bodyLine+="\n"
+      printf "${headerLine}"
+      headerLine=
+      if ${showAll} || ${needBody}; then
+	printf "${bodyLine}"
+      fi
     done
   done
 done
