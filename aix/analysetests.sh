@@ -1,14 +1,29 @@
 #! /usr/bin/env bash
 
-showAll=false
+die() {
+  test -n "$*" && echo "$@" >&2
+  exit 1
+}
+
+DiffOnly=0
+AllHeaders=1
+AllResults=2
+
+toShow=$DiffOnly
+
+srcdir=()
+testdirs=()
+dirtarget=srcdir
 
 while (( $# > 0 ))
 do
   case $1 in
-  --all) showAll=true ;;
-  --diff) showAll=false ;;
-  --help) cat <<EOF
-$0 [--all|--help] <srcdir> <testrundirs...>
+  --all) toShow=$AllResults ;;
+  --headers) toShow=$AllHeaders ;;
+  --diff) toShow=$DiffOnly ;;
+  --help|--*) cat <<EOF
+
+$0 [--all|--headers|--diff|--help] <srcdir> <testrundirs...>
 
 Analyze and compare libtool test suite results from running on AIX in
 <testrundirs....>, using test cases from libtool source found in <srcdir>.
@@ -26,13 +41,25 @@ run configured with "LDFLAGS=-brtl" and "--with-aix-soname={aix,both,svr4}".
 
 EOF
     exit 0 ;;
-  *) break ;;
+  *)
+    eval "$dirtarget+=( \$1 )"
+    dirtarget=testdirs
+    ;;
   esac
   shift
 done
 
-srcdir=$(cd "${1:-./libtool}" && pwd -P)
-shift
+if [[ ${#srcdir} == 0 ]]; then
+  die "missing <srcdir> (try $0 --help)"
+fi
+
+srcdir=$(cd "${srcdir[0]}" && pwd -P)
+if [[ -z ${srcdir} ]]; then
+  die "invalid <srcdir> (try $0 --help)"
+fi
+
+set -- "${testdirs[@]}"
+testdirs=()
 
 while (( $# > 0 ))
 do
@@ -40,8 +67,8 @@ do
   shift
 done
 
-if (( ${#testdirs[@]} == 0 )); then
-  testdirs=( "${srcdir%/*}/test-${srcdir##*/}" )
+if [[ ${#testdirs} == 0 ]]; then
+  die "missing <testrundirs...> (try $0 --help)"
 fi
 
 combodefs=(
@@ -65,11 +92,6 @@ sodefs=(
     'both'
     'svr4'
 )
-
-die() {
-  test -n "$*" && echo "$@" >&2
-  exit 1
-}
 
 close_file() {
   local var=$1
@@ -159,7 +181,7 @@ for tdesc in "${testcases[@]}"; do
       ccdir=${combodef#*:}
       ccdir=${ccdir%:*}
       ccvar=${combodef##*:}
-      needBody=false
+      hasDiff=false
       bodyLine="$(printf "%s%4s %9s" "${indent}" "${bitstext}" "${cctext}")"
 
       for rtldef in "${rtldefs[@]}";  do
@@ -223,14 +245,16 @@ for tdesc in "${testcases[@]}"; do
 	  if [[ "${firstResult-unset}" = unset ]]; then
 	    firstResult=${thisResult}
 	  elif [[ "${firstResult}" != "${thisResult}" ]]; then
-	    needBody=true
+	    hasDiff=true
 	  fi
 	done
       done
       bodyLine+="\n"
-      printf "${headerLine}"
-      headerLine=
-      if ${showAll} || ${needBody}; then
+      if (( ${toShow} >= $AllHeaders )) || ${hasDiff}; then
+	printf "${headerLine}"
+	headerLine=
+      fi
+      if (( ${toShow} >= $AllResults )) || ${hasDiff}; then
 	printf "${bodyLine}"
       fi
     done
