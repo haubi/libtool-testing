@@ -84,7 +84,7 @@ do
 	  echo "LIBPATH=\"${vcLIBPATH}\${LIBPATH:+;}\${LIBPATH}\" export LIBPATH;"
 	} > "${topdir}/x86-msvc${vsver}.sh"
       fi
-      setups+=( "( x86-msvc${vsver} '${topdir}/x86-msvc${vsver}.sh' 'CC=cl CXX=\"cl /TP\" GCJ=no GOC=no F77=no FC=no NM=no CFLAGS= CXXFLAGS=' )" )
+      setups+=( "( x86-msvc${vsver} '${topdir}/x86-msvc${vsver}.sh' 'CC=cl CXX=cl GCJ=no GOC=no F77=no FC=no NM=no CFLAGS= CXXFLAGS=' )" )
     fi
 
     vcPATH= vcINCLUDE= vcLIB= vcLIBPATH=
@@ -107,7 +107,7 @@ do
 	  echo "LIBPATH=\"${vcLIBPATH}\${LIBPATH:+;}\${LIBPATH}\" export LIBPATH;"
 	} > "${topdir}/x64-msvc${vsver}.sh"
       fi
-      setups+=( "( x64-msvc${vsver} '${topdir}/x64-msvc${vsver}.sh' 'CC=cl CXX=\"cl /TP\" GCJ=no GOC=no F77=no FC=no NM=no CFLAGS= CXXFLAGS=' )" )
+      setups+=( "( x64-msvc${vsver} '${topdir}/x64-msvc${vsver}.sh' 'CC=cl CXX=cl GCJ=no GOC=no F77=no FC=no NM=no CFLAGS= CXXFLAGS=' )" )
     fi
   fi
 done
