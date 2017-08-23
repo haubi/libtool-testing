@@ -133,7 +133,6 @@ setups=("${setups[@]}"
   "$(x64-mingw   "( x64-mingw  '' '--host=x86_64-w64-mingw32' )")"
   "$(x86-winnt   "( x86-winnt  '' '--host=i586-pc-winnt' )")"
 
-  "$(x64-mingw   "( x64-mingw  '' '--host=x86_64-w64-mingw32' )")"
   "$(x86-winnt   "( x86-winnt  '' '--host=i586-pc-winnt' )")"
   "$(x64-winnt   "( x64-winnt  '' '--host=x86_64-pc-winnt' )")"
 )
