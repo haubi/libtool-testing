@@ -24,91 +24,144 @@ EOH
   exit 1
 fi
 
-setups=()
+# <for parity-setup>
+get-vsver() { echo "$@"; }
+# </for parity-setup>
+# <from parity-setup>
+
+[[ -r "/proc/registry/HKEY_LOCAL_MACHINE/SOFTWARE/." ]] || exit 0
+
+windir=$(cygpath -W)
+sysdir=$(cygpath -S)
+
+eval 'cmd() {
+  ( set -x
+	tmpfile=`mktemp`;
+	: trap '"'rm -f \"\${tmpfile}\" \"\${tmpfile}.bat\"'"' 0;
+	mv -f "${tmpfile}" "${tmpfile}.bat";
+	for x in "$@"; do echo "$x"; done > "${tmpfile}.bat"
+	chmod +x "${tmpfile}.bat";
+	PATH="'"${windir}:${sysdir}:${sysdir}/WBEM"'" "${tmpfile}.bat";
+  );
+}'
+
+regquery() {
+	regquery_result=
+	if [[ -r /proc/registry/${1}/${2:-.}/. ]]
+	then
+		return 0
+	fi
+	if [[ -r /proc/registry/${1}/${2} ]]
+	then
+		regquery_result=`tr -d \\\\0 < "/proc/registry/${1}/${2}"`
+		return $?
+	fi
+	return 1
+}
+
+regquery_vsroot() {
+	local vsver=$(get-vsver "${1}")
+	vsver=${vsver#msvc}
+	if regquery HKEY_LOCAL_MACHINE/SOFTWARE/Wow6432Node/Microsoft/VisualStudio/SxS/VS7 "${vsver}" \
+	|| regquery HKEY_CURRENT_USER/SOFTWARE/Wow6432Node/Microsoft/VisualStudio/SxS/VS7 "${vsver}" \
+	|| regquery HKEY_LOCAL_MACHINE/SOFTWARE/Microsoft/VisualStudio/SxS/VS7 "${vsver}" \
+	|| regquery HKEY_CURRENT_USER/SOFTWARE/Microsoft/VisualStudio/SxS/VS7 "${vsver}" \
+	; then
+		regquery_vsroot_result=${regquery_result}
+		return 0
+	fi
+	return 1
+}
+
+# </from parity-setup>
 
 cd "${topdir:=.}" || exit 1
 
-vsvers=
-if [[ -n ${SYSTEMROOT} ]]
-then
-  systemroot=$(cygpath -u "${SYSTEMROOT}")
-  comspec=$(cygpath -u "${COMSPEC}")
-  eval "cmd() { PATH=\"${systemroot}:${comspec%/*}:${comspec%/*}/WBEM\" \"${comspec}\" \"\$@\"; }"
-  vsvers="15.0 14.0 12.0 11.0 10.0 9.0 8.0"
-fi
+setups=()
+
+vsvers="15.0 14.0 12.0 11.0 10.0 9.0 8.0"
 
 # query original PATH values used without MSVC
 # to identify the MSVC specific PATH values only
-eval $(cmd /c set PATH '&&' set INCLUDE '&&' set LIB 2>/dev/null |
+eval $(cmd '@set PATH & set INCLUDE & set LIB' 2>/dev/null |
   sed -nE "s/\\r\$//; s,\\\\,/,g; /^(PATH|INCLUDE|LIB|LIBPATH)=/s/^([^=]*)=(.*)\$/novc\1=$'\2'/p"
 )
 
 for vsver in ${vsvers}
 do
-  for regroot in \
-	  /proc/registry32/HKEY_LOCAL_MACHINE \
-	  /proc/registry32/HKEY_CURRENT_USER \
-	  /proc/registry64/HKEY_LOCAL_MACHINE \
-	  /proc/registry64/HKEY_CURRENT_USER \
-  ; do
-    [[ -r ${regroot}/SOFTWARE/Microsoft/VisualStudio/SxS/VS7/${vsver} ]] && break
-  done
-  [[ -r ${regroot}/SOFTWARE/Microsoft/VisualStudio/SxS/VS7/${vsver} ]] || continue
+  regquery_vsroot ${vsver} || continue
 
-  vsroot=$(cygpath -u "$(tr -d $"\0" < "${regroot}/SOFTWARE/Microsoft/VisualStudio/SxS/VS7/${vsver}")")
+  vsroot=${regquery_vsroot_result}
   vsroot=${vsroot%%/}
 
   vcvarsall=${vsroot}/VC/Auxiliary/Build/vcvarsall.bat
   [[ -r ${vcvarsall} ]] ||
   vcvarsall=${vsroot}/VC/vcvarsall.bat
 
-  if [[ -r ${vcvarsall} ]]
-  then
-    vcPATH= vcINCLUDE= vcLIB= vcLIBPATH=
-    INCLUDE= LIB= LIBPATH= \
-    eval $(cmd /c "$(cygpath -w "${vcvarsall}")" x86 '&&' set PATH '&&' set INCLUDE '&&' set LIB 2>/dev/null |
-      sed -nE "s/\\r\$//; s,\\\\,/,g; /^(PATH|INCLUDE|LIB|LIBPATH)=/s/^([^=]*)=(.*)\$/vc\1=$'\2'/p"
-    )
-    vcPATH=${vcPATH%${novcPATH}};          vcPATH=${vcPATH%%;}
-    vcINCLUDE=${vcINCLUDE%${novcINCLUDE}}; vcINCLUDE=${vcINCLUDE%%;}
-    vcLIB=${vcLIB%${novcLIB}};             vcLIB=${vcLIB%%;}
-    vcLIBPATH=${vcLIBPATH%${novcLIBPATH}}; vcLIBPATH=${vcLIBPATH%%;}
-    if [[ "::${vcPATH}::${vcINCLUDE}::${vcLIB}::${vcLIBPATH}::" != *::::* ]]
-    then
-      if ${doSetup}
-      then
-	{
-	  echo "PATH=\"$(cygpath -up "${vcPATH}"):\${PATH}\" export PATH;"
-	  echo "INCLUDE=\"${vcINCLUDE}\${INCLUDE:+;}\${INCLUDE}\" export INCLUDE;"
-	  echo "LIB=\"${vcLIB}\${LIB:+;}\${LIB}\" export LIB;"
-	  echo "LIBPATH=\"${vcLIBPATH}\${LIBPATH:+;}\${LIBPATH}\" export LIBPATH;"
-	} > "${topdir}/x86-msvc${vsver}.sh"
-      fi
-      setups+=( "( x86-msvc${vsver} '${topdir}/x86-msvc${vsver}.sh' 'CC=cl CXX=cl GCJ=no GOC=no F77=no FC=no NM=no CFLAGS= CXXFLAGS=' )" )
-    fi
+  [[ -r ${vcvarsall} ]] || continue
 
-    vcPATH= vcINCLUDE= vcLIB= vcLIBPATH=
-    PATH=${junkpath}:${PATH} INCLUDE= LIB= LIBPATH= \
-    eval $(cmd /c "$(cygpath -w "${vcvarsall}")" x64 '&&' set PATH '&&' set INCLUDE '&&' set LIB 2>/dev/null |
-	    sed -nE "s/\\r\$//; s,\\\\,/,g; /^(PATH|INCLUDE|LIB|LIBPATH)=/s/^([^=]*)=(.*)\$/vc\1=$'\2'/p"
-    )
-    vcPATH=${vcPATH%${novcPATH}};          vcPATH=${vcPATH%%;}
-    vcINCLUDE=${vcINCLUDE%${novcINCLUDE}}; vcINCLUDE=${vcINCLUDE%%;}
-    vcLIB=${vcLIB%${novcLIB}};             vcLIB=${vcLIB%%;}
-    vcLIBPATH=${vcLIBPATH%${novcLIBPATH}}; vcLIBPATH=${vcLIBPATH%%;}
-    if [[ "::${vcPATH}::${vcINCLUDE}::${vcLIB}::${vcLIBPATH}::" != *::::* ]]
+  # MSVC 10.0 and above query their VSxxCOMNTOOLS on their own
+  comntoolsvar=
+  case ${vsver} in
+  7.0) comntoolsvar=VS70COMNTOOLS ;;
+  7.1) comntoolsvar=VS71COMNTOOLS ;;
+  8.0) comntoolsvar=VS80COMNTOOLS ;;
+  9.0) comntoolsvar=VS90COMNTOOLS ;;
+  esac
+  if [[ -n ${comntoolsvar} ]]
+  then
+    if regquery 'HKEY_LOCAL_MACHINE/SYSTEM/CurrentControlSet/Control/Session Manager/Environment' "${comntoolsvar}"
     then
-      if ${doSetup}
-      then
-	{
-	  echo "PATH=\"$(cygpath -up "${vcPATH}"):\${PATH}\" export PATH;"
-	  echo "INCLUDE=\"${vcINCLUDE}\${INCLUDE:+;}\${INCLUDE}\" export INCLUDE;"
-	  echo "LIB=\"${vcLIB}\${LIB:+;}\${LIB}\" export LIB;"
-	  echo "LIBPATH=\"${vcLIBPATH}\${LIBPATH:+;}\${LIBPATH}\" export LIBPATH;"
-	} > "${topdir}/x64-msvc${vsver}.sh"
-      fi
-      setups+=( "( x64-msvc${vsver} '${topdir}/x64-msvc${vsver}.sh' 'CC=cl CXX=cl GCJ=no GOC=no F77=no FC=no NM=no CFLAGS= CXXFLAGS=' )" )
+      eval "export ${comntoolsvar}=\${regquery_result}"
+    else
+      unset ${comntoolsvar}
     fi
+  fi
+
+  vcPATH= vcINCLUDE= vcLIB= vcLIBPATH=
+  INCLUDE= LIB= LIBPATH= \
+  eval $(cmd "@\"$(cygpath -w "${vcvarsall}")\" x86 && ( set PATH & set INCLUDE & set LIB )" 2>/dev/null |
+    sed -nE "s/\\r\$//; s,\\\\,/,g; /^(PATH|INCLUDE|LIB|LIBPATH)=/s/^([^=]*)=(.*)\$/vc\1=$'\2'/p"
+  )
+  vcPATH=${vcPATH%${novcPATH}};          vcPATH=${vcPATH%%;}
+  vcINCLUDE=${vcINCLUDE%${novcINCLUDE}}; vcINCLUDE=${vcINCLUDE%%;}
+  vcLIB=${vcLIB%${novcLIB}};             vcLIB=${vcLIB%%;}
+  vcLIBPATH=${vcLIBPATH%${novcLIBPATH}}; vcLIBPATH=${vcLIBPATH%%;}
+  if [[ "::${vcPATH}::${vcINCLUDE}::${vcLIB}::${vcLIBPATH}::" != *::::* ]]
+  then
+    if ${doSetup}
+    then
+  {
+    echo "PATH=\"$(cygpath -up "${vcPATH}"):\${PATH}\" export PATH;"
+    echo "INCLUDE=\"${vcINCLUDE}\${INCLUDE:+;}\${INCLUDE}\" export INCLUDE;"
+    echo "LIB=\"${vcLIB}\${LIB:+;}\${LIB}\" export LIB;"
+    echo "LIBPATH=\"${vcLIBPATH}\${LIBPATH:+;}\${LIBPATH}\" export LIBPATH;"
+  } > "${topdir}/x86-msvc${vsver}.sh"
+    fi
+    setups+=( "( x86-msvc${vsver} '${topdir}/x86-msvc${vsver}.sh' 'CC=cl CXX=cl GCJ=no GOC=no F77=no FC=no NM=no CFLAGS= CXXFLAGS=' )" )
+  fi
+
+  vcPATH= vcINCLUDE= vcLIB= vcLIBPATH=
+  PATH=${junkpath}:${PATH} INCLUDE= LIB= LIBPATH= \
+  eval $(cmd "@\"$(cygpath -w "${vcvarsall}")\" x64 && ( set PATH & set INCLUDE & set LIB )" 2>/dev/null |
+      sed -nE "s/\\r\$//; s,\\\\,/,g; /^(PATH|INCLUDE|LIB|LIBPATH)=/s/^([^=]*)=(.*)\$/vc\1=$'\2'/p"
+  )
+  vcPATH=${vcPATH%${novcPATH}};          vcPATH=${vcPATH%%;}
+  vcINCLUDE=${vcINCLUDE%${novcINCLUDE}}; vcINCLUDE=${vcINCLUDE%%;}
+  vcLIB=${vcLIB%${novcLIB}};             vcLIB=${vcLIB%%;}
+  vcLIBPATH=${vcLIBPATH%${novcLIBPATH}}; vcLIBPATH=${vcLIBPATH%%;}
+  if [[ "::${vcPATH}::${vcINCLUDE}::${vcLIB}::${vcLIBPATH}::" != *::::* ]]
+  then
+    if ${doSetup}
+    then
+  {
+    echo "PATH=\"$(cygpath -up "${vcPATH}"):\${PATH}\" export PATH;"
+    echo "INCLUDE=\"${vcINCLUDE}\${INCLUDE:+;}\${INCLUDE}\" export INCLUDE;"
+    echo "LIB=\"${vcLIB}\${LIB:+;}\${LIB}\" export LIB;"
+    echo "LIBPATH=\"${vcLIBPATH}\${LIBPATH:+;}\${LIBPATH}\" export LIBPATH;"
+  } > "${topdir}/x64-msvc${vsver}.sh"
+    fi
+    setups+=( "( x64-msvc${vsver} '${topdir}/x64-msvc${vsver}.sh' 'CC=cl CXX=cl GCJ=no GOC=no F77=no FC=no NM=no CFLAGS= CXXFLAGS=' )" )
   fi
 done
 
