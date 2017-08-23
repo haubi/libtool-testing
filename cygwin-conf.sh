@@ -126,13 +126,12 @@ type -P x86_64-w64-mingw32-gcc >/dev/null && type -P x86_64-w64-mingw32-g++ >/de
 type -P      i586-pc-winnt-gcc >/dev/null && type -P      i586-pc-winnt-g++ >/dev/null && x86-winnt()  { printf "${1+%s}" "$@" ; }
 type -P    x86_64-pc-winnt-gcc >/dev/null && type -P    x86_64-pc-winnt-g++ >/dev/null && x64-winnt()  { printf "${1+%s}" "$@" ; }
 
-setups=("${setups[@]}"
+setups=(
+ "${setups[@]}"
   "$(x86-cygwin  "( x86-cygwin '' '--host=i686-pc-cygwin' )")"
   "$(x64-cygwin  "( x64-cygwin '' '--host=x86_64-pc-cygwin' )")"
   "$(x86-mingw   "( x86-mingw  '' '--host=i686-w64-mingw32' )")"
   "$(x64-mingw   "( x64-mingw  '' '--host=x86_64-w64-mingw32' )")"
-  "$(x86-winnt   "( x86-winnt  '' '--host=i586-pc-winnt' )")"
-
   "$(x86-winnt   "( x86-winnt  '' '--host=i586-pc-winnt' )")"
   "$(x64-winnt   "( x64-winnt  '' '--host=x86_64-pc-winnt' )")"
 )
