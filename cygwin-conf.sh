@@ -139,6 +139,7 @@ do
   } > "${topdir}/x86-msvc${vsver}.sh"
     fi
     setups+=( "( x86-msvc${vsver} '${topdir}/x86-msvc${vsver}.sh' 'CC=cl CXX=cl GCJ=no GOC=no F77=no FC=no NM=no CFLAGS= CXXFLAGS=' )" )
+    setups+=( "( x86-wntvc${vsver} '' '--host=i686-pc-winntmsvc${vsver}' )" )
   fi
 
   vcPATH= vcINCLUDE= vcLIB= vcLIBPATH=
@@ -162,6 +163,7 @@ do
   } > "${topdir}/x64-msvc${vsver}.sh"
     fi
     setups+=( "( x64-msvc${vsver} '${topdir}/x64-msvc${vsver}.sh' 'CC=cl CXX=cl GCJ=no GOC=no F77=no FC=no NM=no CFLAGS= CXXFLAGS=' )" )
+#    setups+=( "( x64-wntvc${vsver} '' '--host=x86_64-pc-winntmsvc${vsver}' )" )
   fi
 done
 
