@@ -113,10 +113,10 @@ do
   environment_file=
   configure_arguments=
   eval $(
-  eval "${confline}"
-  echo "toolchain_name='${toolchain_name}';"
-  echo "environment_file='${environment_file}';"
-  echo "configure_arguments='${configure_arguments}';"
+    eval "${confline}"
+    echo "toolchain_name='${toolchain_name}';"
+    echo "environment_file='${environment_file}';"
+    echo "configure_arguments='${configure_arguments}';"
   )
   [[ -n ${toolchain_name} ]] || continue
   toolchain_configs+=( "tcname='${toolchain_name}'" )
@@ -158,13 +158,15 @@ close_file() {
   eval "${var}=-1"
 }
 
-open_file() {
-  local var=$1 redir=$2 file=$3
-  if [[ $(( (BASH_VERSINFO[0] << 8) + BASH_VERSINFO[1] )) -ge $(( (4 << 8) + 1 )) ]] ; then
-    # Newer bash provides this functionality.
+if [[ $(( (BASH_VERSINFO[0] << 8) + BASH_VERSINFO[1] )) -ge $(( (4 << 8) + 1 )) ]] ; then
+  # Newer bash provides this functionality.
+  open_file() {
+    local var=$1 redir=$2 file=$3
     eval "exec {${var}}${redir}'${file}'"
-  else
-    # Need to provide the functionality ourselves.
+  }
+else
+  # Need to provide the functionality ourselves.
+  open_file() {
     local fd=10
     while :; do
       # Make sure the fd isn't open. Any open fd can be opened
@@ -176,8 +178,8 @@ open_file() {
       : $(( ++fd ))
     done
     : $(( ${var} = fd ))
-  fi
-}
+  }
+fi
 
 eval testcases=(
   $(sed -n -e "/^at_help_all=\"/,/^\"/{
@@ -190,23 +192,48 @@ eval testcases=(
   )
 )
 
-printf "\n"
-
 testwidth=0
 for colname in "${col_names[@]}"; do
   (( testwidth += ${#colname} + 3 ))
 done
 
-printf '%3s %3s  ' "" ""
-
-for (( testdirno = 1; testdirno <= ${#testdirs[@]}; ++testdirno )); do
-  printf "|"
-  for colname in "${col_names[@]}"; do
-    printf ' %-6s |' "${colname}"
-  done
+rownamewidth=0
+for rowname in "${row_names[@]}"; do
+  (( rownamewidth >= ${#rowname} )) || rownamewidth=${#rowname}
 done
 
-printf "\n"
+testcolwidth=0
+for colname in "${col_names[@]}"; do
+  colwidth=${#colname}
+  # min width to hold one of "ok", "skip", "xfail", "FAILED"
+  (( colwidth >= 6 )) || colwidth=6
+  (( testcolwidth += colwidth + 2 ))
+done
+
+show_headers() {
+  printf "\n"
+
+  printf "%3s %${rownamewidth}s  " "" ""
+  for (( testdirno = 0; testdirno < ${#testdirs[@]}; ++testdirno )); do
+    printf "| %-${testcolwidth}s|" "${testdirs[${testdirno}]##*-libtool-}"
+  done
+  printf "\n"
+
+  printf "%3s %${rownamewidth}s  " "" ""
+  for (( testdirno = 1; testdirno <= ${#testdirs[@]}; ++testdirno )); do
+    printf "|"
+    for colname in "${col_names[@]}"; do
+      printf ' %-6s |' "${colname}"
+    done
+  done
+  printf "\n"
+
+  printf "\n"
+}
+
+show_headers
+
+testcasesshown=0
 
 for tdesc in "${testcases[@]}"; do
   tno=${tdesc%%;*};     tdesc=${tdesc#${tno};}
@@ -279,7 +306,8 @@ for tdesc in "${testcases[@]}"; do
 	*) cellvalue="" ;;
 	esac
 	colwidth=${#colname}
-	(( colwidth < 6 )) && colwidth=6
+        # min width to hold one of "ok", "skip", "xfail", "FAILED"
+	(( colwidth >= 6 )) || colwidth=6
         thisResult+=$(printf " %-*s |" "${colwidth}" "${cellvalue}")
       done
       rowContent+=${thisResult}
@@ -290,11 +318,16 @@ for tdesc in "${testcases[@]}"; do
       fi
     done
     if ${hasDiff} || [[ ${toShow} -ge ${AllHeaders} ]]; then
-      [[ -n ${testcaseHeader} ]] && printf "%s\n" "${testcaseHeader}"
+      if [[ -n ${testcaseHeader} ]]
+      then
+        (( testcasesshown % 10 == 0 )) && (( testcasesshown > 0 )) && show_headers
+        (( ++testcasesshown ))
+        printf "%s\n" "${testcaseHeader}"
+      fi
       testcaseHeader=""
     fi
     if ${hasDiff} || [[ ${toShow} -ge ${AllResults} ]]; then
-      printf "     %3s %s\n" "${rowname}" "${rowContent}"
+      printf "     %${rownamewidth}s %s\n" "${rowname}" "${rowContent}"
     fi
   done
 done
