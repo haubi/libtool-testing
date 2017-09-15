@@ -202,12 +202,12 @@ for rowname in "${row_names[@]}"; do
   (( rownamewidth >= ${#rowname} )) || rownamewidth=${#rowname}
 done
 
-testcolwidth=0
+testcolwidth=-3
 for colname in "${col_names[@]}"; do
   colwidth=${#colname}
   # min width to hold one of "ok", "skip", "xfail", "FAILED"
   (( colwidth >= 6 )) || colwidth=6
-  (( testcolwidth += colwidth + 2 ))
+  (( testcolwidth += colwidth + 3 ))
 done
 
 show_headers() {
@@ -215,7 +215,7 @@ show_headers() {
 
   printf "%3s %${rownamewidth}s  " "" ""
   for (( testdirno = 0; testdirno < ${#testdirs[@]}; ++testdirno )); do
-    printf "| %-${testcolwidth}s|" "${testdirs[${testdirno}]##*-libtool-}"
+    printf "| %-${testcolwidth}s |" "${testdirs[${testdirno}]##*-libtool-}"
   done
   printf "\n"
 
