@@ -12,6 +12,7 @@ do
   --list) needList=toolchain,environment,configure ;;
   --list=*) needList=${arg#--list=} ;;
   --setup) doSetup=: ;;
+  --debug) PS4='($LINENO)+ '; set -x; ;;
   --topdir=*) topdir=${arg#--topdir=} ;;
   esac
 done
