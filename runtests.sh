@@ -34,6 +34,8 @@ case ${os_conf} in
 *) os_conf=$(pwd)/${os_conf} ;;
 esac
 
+srcdir=$(cd "${srcdir}" && pwd -P) || exit 1
+
 #
 # changes to topdir if set, or srcdir/..
 #
@@ -65,8 +67,6 @@ then
 	echo "ERROR: Cannot read (--os-conf) \"${os_conf}\"." >&2
 	exit 1
 fi
-
-srcdir=$(cd "${srcdir}" && pwd -P) || exit 1
 
 mkdir -p "test-${srcdir##*/}" || exit 1
 
