@@ -13,9 +13,15 @@ srcdir=()
 testdirs=()
 dirtarget=srcdir
 
+die() {
+  test -n "$*" && echo "$@" >&2
+  exit 1
+}
+
 while (( $# > 0 ))
 do
   case $1 in
+  --debug) PS4='($LINENO)+ '; set -x ;;
   --os-conf=*) os_conf=${arg#--os-conf=} ;;
   --all) toShow=$AllResults ;;
   --headers) toShow=$AllHeaders ;;
@@ -121,11 +127,6 @@ do
   [[ -n ${toolchain_name} ]] || continue
   toolchain_configs+=( "tcname='${toolchain_name}'" )
 done <<< "${conflines}"
-
-die() {
-  test -n "$*" && echo "$@" >&2
-  exit 1
-}
 
 col_names=()
 row_names=()
