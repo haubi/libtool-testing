@@ -25,26 +25,62 @@ EOH
   exit 1
 fi
 
-# <for parity-setup>
-get-vsver() { echo "$@"; }
-# </for parity-setup>
-# <from parity-setup>
+# <for functions copied from parity-setup>
+get-chost() { echo "$@"; }
+verbose() { :; }
+traceon() { :; }
+traceoff() { :; }
+noquiet() { :; }
+is-supported-chost() { :; }
+# </for functions copied from parity-setup>
+# <functions copied from parity-setup>
 
 [[ -r "/proc/registry/HKEY_LOCAL_MACHINE/SOFTWARE/." ]] || exit 0
 
 windir=$(cygpath -W)
 sysdir=$(cygpath -S)
 
-eval 'cmd() {
+eval "cmd() {
   ( set -x
-	tmpfile=`mktemp`;
-	: trap '"'rm -f \"\${tmpfile}\" \"\${tmpfile}.bat\"'"' 0;
-	mv -f "${tmpfile}" "${tmpfile}.bat";
-	for x in "$@"; do echo "$x"; done > "${tmpfile}.bat"
-	chmod +x "${tmpfile}.bat";
-	PATH="'"${windir}:${sysdir}:${sysdir}/WBEM"'" "${tmpfile}.bat";
-  );
-}'
+	tmpfile=\`mktemp\`
+	trap \"rm -f '\${tmpfile}' '\${tmpfile}.bat'\" 0
+	mv -f \"\${tmpfile}\" \"\${tmpfile}.bat\"
+	for x in \"\$@\"; do echo \"\$x\"; done > \"\${tmpfile}.bat\"
+	chmod +x \"\${tmpfile}.bat\"
+	PATH=\"${windir}:${sysdir}:${sysdir}/WBEM\" \"\${tmpfile}.bat\"
+  )
+}"
+
+get-vscrt() {
+	local vscrt=${1}
+	case ${vscrt} in
+	libcmtd*|*-libcmtd*|staticdebug) echo "libcmtd" ;;
+	libcmt*|*-libcmt*|static) echo "libcmt" ;;
+	msvcd*|*-msvcd*|dynamicdebug) echo "msvcd" ;;
+	*) echo "msvc" ;;
+	esac
+	return 0
+}
+
+get-vsver() {
+	local vscrt=$(get-vscrt "$1")
+	local vsver=${1##*${vscrt}}
+	vsver=${vsver%%-*}
+	case ${vsver} in
+	[7-9]      |[1-9][0-9]      ) echo "${vsver}.0" ;;
+	[7-9].[0-9]|[1-9][0-9].[0-9]) echo "${vsver}" ;;
+	esac
+	return 0
+}
+
+get-vsarch() {
+	local vsarch=${1%%-*}
+	case ${vsarch} in
+	x64|amd64|x86_64) echo "x64" ;;
+	x86|i?86)         echo "x86" ;;
+	esac
+	return 0
+}
 
 regquery() {
 	regquery_result=
@@ -62,7 +98,6 @@ regquery() {
 
 regquery_vsroot() {
 	local vsver=$(get-vsver "${1}")
-	vsver=${vsver#msvc}
 	if regquery HKEY_LOCAL_MACHINE/SOFTWARE/Wow6432Node/Microsoft/VisualStudio/SxS/VS7 "${vsver}" \
 	|| regquery HKEY_CURRENT_USER/SOFTWARE/Wow6432Node/Microsoft/VisualStudio/SxS/VS7 "${vsver}" \
 	|| regquery HKEY_LOCAL_MACHINE/SOFTWARE/Microsoft/VisualStudio/SxS/VS7 "${vsver}" \
@@ -74,97 +109,195 @@ regquery_vsroot() {
 	return 1
 }
 
-# </from parity-setup>
+locate_vswhere_exe() {
+	# Since Visual Studio 2019 there is the standalone "Visual Studio Installer"
+	# package providing vswhere.exe, which does register itself to the registry.
+	local vswhere_exe
+	if regquery HKEY_LOCAL_MACHINE/SOFTWARE/Microsoft/VisualStudio/Setup SharedInstallationPath \
+	&& vswhere_exe=$(dirname "$(cygpath -u "${regquery_result}")")/Installer/vswhere.exe \
+	&& [[ -x ${vswhere_exe} ]] \
+	; then
+		locate_vswhere_exe_result=${vswhere_exe}
+		return 0
+	fi
+	#
+	# https://devblogs.microsoft.com/setup/vswhere-is-now-installed-with-visual-studio-2017/
+	#
+	local folderIDs=(
+		38 # ProgramFiles(x86)
+		42 # ProgramFiles
+	)
+	local folderID
+	for folderID in ${folderIDs[*]}
+	do
+		vswhere_exe="$(cygpath -F ${folderID})/Microsoft Visual Studio/Installer/vswhere.exe"
+		[[ -x ${vswhere_exe} ]] || continue
+		locate_vswhere_exe_result=${vswhere_exe}
+		return 0
+	done
+	locate_vswhere_exe_result=
+	return 1
+}
+
+vswhere() {
+	# initial vswhere() does set up location of vswhere.exe
+	if locate_vswhere_exe; then
+		# redefine vswhere() to execute vswhere.exe
+		eval "vswhere() {
+			vswhere_result=
+			vswhere_result=\$(\"${locate_vswhere_exe_result}\" \"\$@\" | dos2unix)
+			return \$?
+		}"
+	else
+		# missing vswhere.exe, redefine vswhere() as noop
+		vswhere() {
+			vswhere_result=
+			return 1
+		}
+	fi
+	# re-execute vswhere() to return results
+	vswhere "$@"
+	return $?
+}
+
+vswhere_installationPath() {
+	local vsver=$(get-vsver "${1}")
+	vswhere_installationPath_result=
+	vswhere -nologo \
+		-version "[${vsver},${vsver}.65535]" \
+		-requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 \
+		-latest \
+		-format text \
+		-property installationPath \
+		|| return 1
+	[[ ${vswhere_result} == 'installationPath: '* ]] || return 1
+	vswhere_installationPath_result=${vswhere_result#installationPath: }
+	return 0
+}
+
+query-novcvars-once() {
+	[[ -z ${novcPATH-}${novcINCLUDE-}${novcLIB-}${novcLIBPATH-} ]] || return 0
+
+	novcPATH= novcINCLUDE= novcLIB= novcLIBPATH=
+
+	verbose "Querying environment without MSVC ..."
+	traceon
+	eval $(cmd '@set PATH & set INCLUDE & set LIB' 2>/dev/null |
+		sed -nE "s/\\r\$//; s,\\\\,/,g; /^(PATH|INCLUDE|LIB|LIBPATH)=/s/^([^=]*)=(.*)\$/novc\1=$'\2'/p"
+	)
+	traceoff $?
+
+	if [[ -n ${novcPATH}${novcINCLUDE}${novcLIB}${novcLIBPATH} ]]
+	then
+		verbose "Querying environment without MSVC done."
+		return 0
+	fi
+	noquiet "Querying environment without MSVC failed."
+	return 1
+}
+
+query-vcvars() {
+	local chost=$(get-chost "$1")
+	is-supported-chost "${chost}" || return 1
+
+	query-novcvars-once || die "Cannot get even initial environment."
+
+	local vsver=$(get-vsver "${chost}")
+	local vsarch=$(get-vsarch "${chost}")
+	local vsroot=
+	if vswhere_installationPath "${vsver}"; then
+		vsroot=${vswhere_installationPath_result}
+	elif regquery_vsroot "${vsver}"; then
+		vsroot=${regquery_vsroot_result}
+	else
+		return 1
+	fi
+
+	noquiet "Querying environment for ${chost} ..."
+
+	vcPATH= vcINCLUDE= vcLIB= vcLIBPATH=
+
+	vsroot=$(cygpath -u "$vsroot")
+	local vcvarsall
+	vcvarsall=${vsroot}/VC/Auxiliary/Build/vcvarsall.bat
+	[[ -r ${vcvarsall} ]] ||
+	vcvarsall=${vsroot}/VC/vcvarsall.bat
+	[[ -r ${vcvarsall} ]] || return 1
+
+	# MSVC 10.0 and above query their VSxxCOMNTOOLS on their own
+	local comntoolsvar=
+	case ${vsver} in
+	7.0) comntoolsvar=VS70COMNTOOLS ;;
+	7.1) comntoolsvar=VS71COMNTOOLS ;;
+	8.0) comntoolsvar=VS80COMNTOOLS ;;
+	9.0) comntoolsvar=VS90COMNTOOLS ;;
+	esac
+	if [[ -n ${comntoolsvar} ]]
+	then
+		if regquery 'HKEY_LOCAL_MACHINE/SYSTEM/CurrentControlSet/Control/Session Manager/Environment' "${comntoolsvar}"
+		then
+			eval "export ${comntoolsvar}=\${regquery_result}"
+		else
+			unset ${comntoolsvar}
+		fi
+	fi
+
+	traceon
+    INCLUDE= LIB= LIBPATH= \
+    eval $(cmd "@\"$(cygpath -w "${vcvarsall}")\" ${vsarch} && ( set PATH & set INCLUDE & set LIB )" 2>/dev/null |
+      sed -nE "s/\\r\$//; s,\\\\,/,g; /^(PATH|INCLUDE|LIB|LIBPATH)=/s/^([^=]*)=(.*)\$/vc\1=$'\2'/p"
+    )
+	traceoff $?
+    vcPATH=${vcPATH%${novcPATH}};          vcPATH=${vcPATH%%;}
+    vcINCLUDE=${vcINCLUDE%${novcINCLUDE}}; vcINCLUDE=${vcINCLUDE%%;}
+    vcLIB=${vcLIB%${novcLIB}};             vcLIB=${vcLIB%%;}
+    vcLIBPATH=${vcLIBPATH%${novcLIBPATH}}; vcLIBPATH=${vcLIBPATH%%;}
+
+    if [[ "::${vcPATH}::${vcINCLUDE}::${vcLIB}::${vcLIBPATH}::" == *::::* ]]
+	then
+		verbose "Querying environment for ${chost} failed."
+		return 1
+	fi
+	verbose "Querying environment for ${chost} done."
+	return 0
+}
+
+# </functions copied from parity-setup>
 
 cd "${topdir:=.}" || exit 1
 
 setups=()
 
-vsvers="15.0 14.0 12.0 11.0 10.0 9.0 8.0"
-
-# query original PATH values used without MSVC
-# to identify the MSVC specific PATH values only
-eval $(cmd '@set PATH & set INCLUDE & set LIB' 2>/dev/null |
-  sed -nE "s/\\r\$//; s,\\\\,/,g; /^(PATH|INCLUDE|LIB|LIBPATH)=/s/^([^=]*)=(.*)\$/novc\1=$'\2'/p"
+vschosts=(
+	{i686,x86_64}-msvc{16.2,15.0,14.0,12.0,11.0,10.0,9.0,8.0}-winnt
 )
 
-for vsver in ${vsvers}
+for vschost in ${vschosts[*]}
 do
-  regquery_vsroot ${vsver} || continue
+  query-vcvars ${vschost} || continue
 
-  vsroot=${regquery_vsroot_result}
-  vsroot=${vsroot%%/}
+  vschostmingw32=${vschost%-winnt}-mingw32
+  vsarch=$(get-vsarch ${vschost})
+  vscrt=$(get-vscrt ${vschost})
+  vsver=$(get-vsver ${vschost})
 
-  vcvarsall=${vsroot}/VC/Auxiliary/Build/vcvarsall.bat
-  [[ -r ${vcvarsall} ]] ||
-  vcvarsall=${vsroot}/VC/vcvarsall.bat
-
-  [[ -r ${vcvarsall} ]] || continue
-
-  # MSVC 10.0 and above query their VSxxCOMNTOOLS on their own
-  comntoolsvar=
-  case ${vsver} in
-  7.0) comntoolsvar=VS70COMNTOOLS ;;
-  7.1) comntoolsvar=VS71COMNTOOLS ;;
-  8.0) comntoolsvar=VS80COMNTOOLS ;;
-  9.0) comntoolsvar=VS90COMNTOOLS ;;
-  esac
-  if [[ -n ${comntoolsvar} ]]
-  then
-    if regquery 'HKEY_LOCAL_MACHINE/SYSTEM/CurrentControlSet/Control/Session Manager/Environment' "${comntoolsvar}"
-    then
-      eval "export ${comntoolsvar}=\${regquery_result}"
-    else
-      unset ${comntoolsvar}
-    fi
-  fi
-
-  vcPATH= vcINCLUDE= vcLIB= vcLIBPATH=
-  INCLUDE= LIB= LIBPATH= \
-  eval $(cmd "@\"$(cygpath -w "${vcvarsall}")\" x86 && ( set PATH & set INCLUDE & set LIB )" 2>/dev/null |
-    sed -nE "s/\\r\$//; s,\\\\,/,g; /^(PATH|INCLUDE|LIB|LIBPATH)=/s/^([^=]*)=(.*)\$/vc\1=$'\2'/p"
-  )
-  vcPATH=${vcPATH%${novcPATH}};          vcPATH=${vcPATH%%;}
-  vcINCLUDE=${vcINCLUDE%${novcINCLUDE}}; vcINCLUDE=${vcINCLUDE%%;}
-  vcLIB=${vcLIB%${novcLIB}};             vcLIB=${vcLIB%%;}
-  vcLIBPATH=${vcLIBPATH%${novcLIBPATH}}; vcLIBPATH=${vcLIBPATH%%;}
   if [[ "::${vcPATH}::${vcINCLUDE}::${vcLIB}::${vcLIBPATH}::" != *::::* ]]
   then
     if ${doSetup}
     then
   {
-    echo "PATH=\"$(cygpath -up "${vcPATH}"):\${PATH}\" export PATH;"
+	vcPATH=$(cygpath -up "${vcPATH}")
+	vcPATH=${vcPATH//:${windir}:/:}
+	vcPATH=${vcPATH//:${sysdir}:/:}
+    echo "PATH=\"${vcPATH}:\${PATH}:${windir}:${sysdir}\" export PATH;"
     echo "INCLUDE=\"${vcINCLUDE}\${INCLUDE:+;}\${INCLUDE}\" export INCLUDE;"
     echo "LIB=\"${vcLIB}\${LIB:+;}\${LIB}\" export LIB;"
     echo "LIBPATH=\"${vcLIBPATH}\${LIBPATH:+;}\${LIBPATH}\" export LIBPATH;"
-  } > "${topdir}/x86-msvc${vsver}.sh"
+  } > "${topdir}/${vschostmingw32}.sh"
     fi
-    setups+=( "( x86-msvc${vsver} '${topdir}/x86-msvc${vsver}.sh' 'CC=cl CXX=cl GCJ=no GOC=no F77=no FC=no NM=no CFLAGS= CXXFLAGS=' )" )
-    setups+=( "( x86-wntvc${vsver} '' '--host=i686-pc-winntmsvc${vsver} GCJ=no GOC=no F77=no FC=no' )" )
-  fi
-
-  vcPATH= vcINCLUDE= vcLIB= vcLIBPATH=
-  PATH=${junkpath}:${PATH} INCLUDE= LIB= LIBPATH= \
-  eval $(cmd "@\"$(cygpath -w "${vcvarsall}")\" x64 && ( set PATH & set INCLUDE & set LIB )" 2>/dev/null |
-      sed -nE "s/\\r\$//; s,\\\\,/,g; /^(PATH|INCLUDE|LIB|LIBPATH)=/s/^([^=]*)=(.*)\$/vc\1=$'\2'/p"
-  )
-  vcPATH=${vcPATH%${novcPATH}};          vcPATH=${vcPATH%%;}
-  vcINCLUDE=${vcINCLUDE%${novcINCLUDE}}; vcINCLUDE=${vcINCLUDE%%;}
-  vcLIB=${vcLIB%${novcLIB}};             vcLIB=${vcLIB%%;}
-  vcLIBPATH=${vcLIBPATH%${novcLIBPATH}}; vcLIBPATH=${vcLIBPATH%%;}
-  if [[ "::${vcPATH}::${vcINCLUDE}::${vcLIB}::${vcLIBPATH}::" != *::::* ]]
-  then
-    if ${doSetup}
-    then
-  {
-    echo "PATH=\"$(cygpath -up "${vcPATH}"):\${PATH}\" export PATH;"
-    echo "INCLUDE=\"${vcINCLUDE}\${INCLUDE:+;}\${INCLUDE}\" export INCLUDE;"
-    echo "LIB=\"${vcLIB}\${LIB:+;}\${LIB}\" export LIB;"
-    echo "LIBPATH=\"${vcLIBPATH}\${LIBPATH:+;}\${LIBPATH}\" export LIBPATH;"
-  } > "${topdir}/x64-msvc${vsver}.sh"
-    fi
-    setups+=( "( x64-msvc${vsver} '${topdir}/x64-msvc${vsver}.sh' 'CC=cl CXX=cl GCJ=no GOC=no F77=no FC=no NM=no CFLAGS= CXXFLAGS=' )" )
-#    setups+=( "( x64-wntvc${vsver} '' '--host=x86_64-pc-winntmsvc${vsver} GCJ=no GOC=no F77=no FC=no' )" )
+    type -P ${vschost}-gcc >/dev/null && type -P ${vschost}-g++ >/dev/null &&
+    setups+=( "( ${vschost}        ''                               '--build=${vschost}       --host=${vschost}        GCJ=no GOC=no F77=no FC=no' )" )
+    setups+=( "( ${vschostmingw32} '${topdir}/${vschostmingw32}.sh' '--build=x86_64-pc-cygwin --host=${vschostmingw32} GCJ=no GOC=no F77=no FC=no CC=cl CXX=cl OBJDUMP=no NM=no CFLAGS= CXXFLAGS=' )" )
   fi
 done
 
@@ -172,24 +305,18 @@ x86-cygwin() { false; }
 x64-cygwin() { false; }
 x86-mingw() { false; }
 x64-mingw() { false; }
-x86-winnt() { false; }
-x64-winnt() { false; }
 
 type -P     i686-pc-cygwin-gcc >/dev/null && type -P     i686-pc-cygwin-g++ >/dev/null && x86-cygwin() { printf "${1+%s}" "$@" ; }
 type -P   x86_64-pc-cygwin-gcc >/dev/null && type -P   x86_64-pc-cygwin-g++ >/dev/null && x64-cygwin() { printf "${1+%s}" "$@" ; }
 type -P   i686-w64-mingw32-gcc >/dev/null && type -P   i686-w64-mingw32-g++ >/dev/null && x86-mingw()  { printf "${1+%s}" "$@" ; }
 type -P x86_64-w64-mingw32-gcc >/dev/null && type -P x86_64-w64-mingw32-g++ >/dev/null && x64-mingw()  { printf "${1+%s}" "$@" ; }
-type -P      i586-pc-winnt-gcc >/dev/null && type -P      i586-pc-winnt-g++ >/dev/null && x86-winnt()  { printf "${1+%s}" "$@" ; }
-type -P    x86_64-pc-winnt-gcc >/dev/null && type -P    x86_64-pc-winnt-g++ >/dev/null && x64-winnt()  { printf "${1+%s}" "$@" ; }
 
 setups=(
- "${setups[@]}"
-  "$(x86-cygwin  "( x86-cygwin '' '--host=i686-pc-cygwin' )")"
-  "$(x64-cygwin  "( x64-cygwin '' '--host=x86_64-pc-cygwin' )")"
-  "$(x86-mingw   "( x86-mingw  '' '--host=i686-w64-mingw32' )")"
-  "$(x64-mingw   "( x64-mingw  '' '--host=x86_64-w64-mingw32' )")"
-  "$(x86-winnt   "( x86-winnt  '' '--host=i586-pc-winnt' )")"
-  "$(x64-winnt   "( x64-winnt  '' '--host=x86_64-pc-winnt' )")"
+   "$(x86-cygwin  "( x86-cygwin '' '--build=i686-pc-cygwin     --host=i686-pc-cygwin'     )")"
+  "$(x64-cygwin  "( x64-cygwin '' '--build=x86_64-pc-cygwin   --host=x86_64-pc-cygwin'   )")"
+  "$(x86-mingw   "( x86-mingw  '' '--build=i686-w64-mingw32   --host=i686-w64-mingw32'   )")"
+  "$(x64-mingw   "( x64-mingw  '' '--build=x86_64-w64-mingw32 --host=x86_64-w64-mingw32' )")"
+  "${setups[@]}"
 )
 
 if [[ -n ${needList} ]]
