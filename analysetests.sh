@@ -12,6 +12,7 @@ os_conf=
 srcdir=()
 testdirs=()
 dirtarget=srcdir
+toolchain_configs=()
 
 die() {
   test -n "$*" && echo "$@" >&2
@@ -23,12 +24,13 @@ do
   case $1 in
   --debug) PS4='($LINENO)+ '; set -x ;;
   --os-conf=*) os_conf=${arg#--os-conf=} ;;
+  --toolchain=*) toolchain_configs+=( "tcname='${1#--toolchain=}'" ) ;;
   --all) toShow=$AllResults ;;
   --headers) toShow=$AllHeaders ;;
   --diff) toShow=$DiffOnly ;;
   --help|--*) cat <<EOF
 
-$0 [--all|--headers|--diff|--help] [--os-conf=/path/to/os-conf.sh] <srcdir> <testrundirs...>
+$0 [--all|--headers|--diff|--help] [--os-conf=/path/to/os-conf.sh|--toolchain=<tc> ...] <srcdir> <testrundirs...>
 
 Analyze and compare libtool test suite results from running on AIX in
 <testrundirs....>, using test cases from libtool source found in <srcdir>.
@@ -76,57 +78,58 @@ if [[ ${#testdirs[@]} == 0 ]]; then
   die "missing <testrundirs...> (try $0 --help)"
 fi
 
-# support relative path in --os-conf
-case ${os_conf} in
-/* | "") ;;
-*) os_conf=$(pwd)/${os_conf} ;;
-esac
-
-if [[ -z ${os_conf} ]]
+if (( ${#toolchain_configs[*]} == 0 ))
 then
-  case $(uname) in
-  AIX*) os_conf="${mydir}/aix-conf.sh" ;;
-  CYGWIN*) os_conf="${mydir}/cygwin-conf.sh" ;;
+  # support relative path in --os-conf
+  case ${os_conf} in
+  /* | "") ;;
+  *) os_conf=$(pwd)/${os_conf} ;;
   esac
+
+  if [[ -z ${os_conf} ]]
+  then
+    case $(uname) in
+    AIX*) os_conf="${mydir}/aix-conf.sh" ;;
+    CYGWIN*) os_conf="${mydir}/cygwin-conf.sh" ;;
+    esac
+  fi
+
+  if [[ -z ${os_conf} ]]
+  then
+    echo "ERROR: Unknown OS $(uname), please specify \"--os-conf=/path/to/os-conf.sh\"." >&2
+    exit 1
+  fi
+
+  if [[ ! -r ${os_conf} ]]
+  then
+    echo "ERROR: Cannot read (--os-conf) \"${os_conf}\"." >&2
+    exit 1
+  fi
+
+  echo "Querying OS configuration from \"${os_conf}\" ..."
+  conflines=$("${BASH}" "${os_conf}" --list=toolchain)
+
+  if [[ $? -ne 0 ]]
+  then
+    echo "ERROR: Querying OS configuration from \"${os_conf}\" failed." >&2
+    exit 1
+  fi
+
+  while read confline
+  do
+    toolchain_name=
+    environment_file=
+    configure_arguments=
+    eval $(
+      eval "${confline}"
+      echo "toolchain_name='${toolchain_name}';"
+      echo "environment_file='${environment_file}';"
+      echo "configure_arguments='${configure_arguments}';"
+    )
+    [[ -n ${toolchain_name} ]] || continue
+    toolchain_configs+=( "tcname='${toolchain_name}'" )
+  done <<< "${conflines}"
 fi
-
-if [[ -z ${os_conf} ]]
-then
-  echo "ERROR: Unknown OS $(uname), please specify \"--os-conf=/path/to/os-conf.sh\"." >&2
-  exit 1
-fi
-
-if [[ ! -r ${os_conf} ]]
-then
-  echo "ERROR: Cannot read (--os-conf) \"${os_conf}\"." >&2
-  exit 1
-fi
-
-echo "Querying OS configuration from \"${os_conf}\" ..."
-conflines=$("${BASH}" "${os_conf}" --list=toolchain)
-
-if [[ $? -ne 0 ]]
-then
-  echo "ERROR: Querying OS configuration from \"${os_conf}\" failed." >&2
-  exit 1
-fi
-
-toolchain_configs=()
-
-while read confline
-do
-  toolchain_name=
-  environment_file=
-  configure_arguments=
-  eval $(
-    eval "${confline}"
-    echo "toolchain_name='${toolchain_name}';"
-    echo "environment_file='${environment_file}';"
-    echo "configure_arguments='${configure_arguments}';"
-  )
-  [[ -n ${toolchain_name} ]] || continue
-  toolchain_configs+=( "tcname='${toolchain_name}'" )
-done <<< "${conflines}"
 
 col_names=()
 row_names=()
