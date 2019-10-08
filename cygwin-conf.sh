@@ -296,8 +296,8 @@ do
   } > "${topdir}/${vschostmingw32}.sh"
     fi
     type -P ${vschost}-gcc >/dev/null && type -P ${vschost}-g++ >/dev/null &&
-    setups+=( "( ${vschost}        ''                               '--build=${vschost}       --host=${vschost}        GCJ=no GOC=no F77=no FC=no' )" )
-    setups+=( "( ${vschostmingw32} '${topdir}/${vschostmingw32}.sh' '--build=x86_64-pc-cygwin --host=${vschostmingw32} GCJ=no GOC=no F77=no FC=no CC=cl CXX=cl OBJDUMP=no NM=no CFLAGS= CXXFLAGS=' )" )
+    setups+=( "( ${vschost}        ''                               '--build=${vschost} --host=${vschost}        GCJ=no GOC=no F77=no FC=no' )" )
+    setups+=( "( ${vschostmingw32} '${topdir}/${vschostmingw32}.sh' '                   --host=${vschostmingw32} GCJ=no GOC=no F77=no FC=no CC=cl CXX=cl OBJDUMP=no NM=no CFLAGS= CXXFLAGS=' )" )
   fi
 done
 
@@ -312,10 +312,10 @@ type -P   i686-w64-mingw32-gcc >/dev/null && type -P   i686-w64-mingw32-g++ >/de
 type -P x86_64-w64-mingw32-gcc >/dev/null && type -P x86_64-w64-mingw32-g++ >/dev/null && x64-mingw()  { printf "${1+%s}" "$@" ; }
 
 setups=(
-   "$(x86-cygwin  "( x86-cygwin '' '--build=i686-pc-cygwin     --host=i686-pc-cygwin'     )")"
-  "$(x64-cygwin  "( x64-cygwin '' '--build=x86_64-pc-cygwin   --host=x86_64-pc-cygwin'   )")"
-  "$(x86-mingw   "( x86-mingw  '' '--build=i686-w64-mingw32   --host=i686-w64-mingw32'   )")"
-  "$(x64-mingw   "( x64-mingw  '' '--build=x86_64-w64-mingw32 --host=x86_64-w64-mingw32' )")"
+  "$(x86-cygwin  "( x86-cygwin '' '--host=i686-pc-cygwin'     )")"
+  "$(x64-cygwin  "( x64-cygwin '' '--host=x86_64-pc-cygwin'   )")"
+  "$(x86-mingw   "( x86-mingw  '' '--host=i686-w64-mingw32'   )")"
+  "$(x64-mingw   "( x64-mingw  '' '--host=x86_64-w64-mingw32' )")"
   "${setups[@]}"
 )
 
