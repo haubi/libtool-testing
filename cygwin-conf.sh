@@ -165,7 +165,10 @@ vswhere() {
 vswhere_installationPath() {
 	local vsver=$(get-vsver "${1}")
 	vswhere_installationPath_result=
+	# Note that vswhere does require the user to be either an Administrator,
+	# or a member of the "Distributed COM Users" local group.
 	vswhere -nologo \
+		-products "*" \
 		-version "[${vsver},${vsver}.65535]" \
 		-requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 \
 		-latest \
