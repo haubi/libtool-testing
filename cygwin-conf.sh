@@ -67,7 +67,9 @@ get-vsver() {
 	local vsver=${1##*${vscrt}}
 	vsver=${vsver%%-*}
 	case ${vsver} in
-	[7-9]      |[1-9][0-9]      ) echo "${vsver}.0" ;;
+	            1[5-9].*        ) echo "${vsver%.*}" ;;
+	            1[5-9]          ) echo "${vsver}" ;;
+	[7-9]      |1[0-4]          ) echo "${vsver}.0" ;;
 	[7-9].[0-9]|[1-9][0-9].[0-9]) echo "${vsver}" ;;
 	esac
 	return 0
@@ -269,7 +271,7 @@ cd "${topdir:=.}" || exit 1
 setups=()
 
 vschosts=(
-	{i686,x86_64}-msvc{16.2,15.0,14.0,12.0,11.0,10.0,9.0,8.0}-winnt
+	{i686,x86_64}-msvc{16,15,14.0,12.0,11.0,10.0,9.0,8.0}-winnt
 )
 
 for vschost in ${vschosts[*]}
